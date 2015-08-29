@@ -15,6 +15,8 @@ public class Bootstrap {
 
 	protected static Path getLibsDir() {
 		URL jarUrl = Bootstrap.class.getProtectionDomain().getCodeSource().getLocation();
+		if (!jarUrl.getProtocol().equals("jar"))
+			return null;
 		String jarFilePath = null;
 		try {
 			jarFilePath = new URL(jarUrl.getPath()).getPath();
@@ -31,6 +33,8 @@ public class Bootstrap {
 
 	public static void initLib(String name, String version) {
 		Path libsDir = getLibsDir();
+		if (libsDir == null)
+			return;
 		String libJarName = name + "-" + version + ".jar";
 
 		try {

@@ -2,10 +2,12 @@ package com.hea3ven.tweaks.bootstrap;
 
 import java.io.IOException;
 import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 
 import com.google.common.base.Throwables;
 
@@ -19,16 +21,14 @@ public class Bootstrap {
 			return null;
 		String jarFilePath = null;
 		try {
-			jarFilePath = new URL(jarUrl.getPath()).getPath();
-		} catch (MalformedURLException e) {
+			jarFilePath = Paths.get(new URI(jarUrl.getPath())).toString();
+		} catch (URISyntaxException e) {
 			Throwables.propagate(e);
 		}
-		Path libsDir = FileSystems
-				.getDefault()
-				.getPath(jarFilePath.substring(0, jarFilePath.lastIndexOf('!')))
-				.getParent()
-				.resolve("h3ntlibs");
-		return libsDir;
+		if (jarFilePath.lastIndexOf('!') != -1)
+			jarFilePath = jarFilePath.substring(0, jarFilePath.lastIndexOf('!'));
+		Path jarDir = Paths.get(jarFilePath).getParent();
+		return jarDir.resolve("h3ntlibs");
 	}
 
 	public static void initLib(String name, String version) {
@@ -50,11 +50,9 @@ public class Bootstrap {
 			Throwables.propagate(e);
 		}
 		try {
-			Launch.classLoader
-					.addURL(new URL("file", null, libsDir.resolve(libJarName).toString()));
+			Launch.classLoader.addURL(libsDir.resolve(libJarName).toUri().toURL());
 		} catch (MalformedURLException e) {
 			Throwables.propagate(e);
 		}
 	}
-
 }

@@ -1,4 +1,4 @@
-package com.hea3ven.tweaks.bootstrap;
+package com.hea3ven.tools.bootstrap;
 
 import java.io.IOException;
 import java.net.MalformedURLException;

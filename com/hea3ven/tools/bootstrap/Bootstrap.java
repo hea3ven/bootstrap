@@ -1,6 +1,9 @@
 package com.hea3ven.tools.bootstrap;
 
-import java.io.*;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -9,22 +12,26 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Enumeration;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Set;
+import java.util.Properties;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 import com.google.common.base.Throwables;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.MethodNode;
 
 import net.minecraft.launchwrapper.Launch;
 
@@ -36,7 +43,7 @@ public class Bootstrap {
 
 	private static final Logger logger = LogManager.getLogger("H3NTBootstrap.Bootstrap");
 
-	public static final String version = "1.1.0";
+	public static final String version = "1.1.1";
 	private static boolean init = false;
 
 	private Map<String, LibEntry> libs = Maps.newHashMap();
@@ -79,60 +86,114 @@ public class Bootstrap {
 		return jarDir.resolve("h3ntlibs");
 	}
 
-	public void checkVersion(String modId, String versionPattern) {
+	private void checkVersion(String modId, String versionPattern) {
 		if (!matches(versionPattern, version))
 			throw new RuntimeException("Mod '" + modId + "' requires Boostrap version " + versionPattern +
 					", but the current loaded version is " + version);
 	}
 
-	public void addLib(String modid, File zipFile, String name, String version, String versionPattern) {
+	private void addLib(String modid, File zipFile, String name, String version, String versionPattern) {
 		if (!libs.containsKey(name))
 			libs.put(name, new LibEntry(name));
 		libs.get(name).add(modid, zipFile, new ComparableVersion(version), versionPattern);
 	}
 
-	public void discover() {
+	private void discover() {
 		File mcDir = ReflectionHelper.getPrivateValue(FMLRelaunchLog.class, null, "minecraftHome");
 		Path modsDir = Paths.get(mcDir.toString(), "mods");
 
+		String mcVersion = getMinecraftVersion();
+		discoverFromDir(modsDir, mcVersion);
+	}
+
+	private void discoverFromDir(Path modsDir, String mcVersion) {
 		try {
 			DirectoryStream<Path> modDirs = Files.newDirectoryStream(modsDir);
 			for (Path modPath : modDirs) {
-				if (!Files.isRegularFile(modPath))
-					continue;
-				try (ZipFile jarZip = new ZipFile(modPath.toFile())) {
-					for (Enumeration<? extends ZipEntry> e = jarZip.entries(); e.hasMoreElements(); ) {
-						ZipEntry entry = e.nextElement();
-						if (entry.isDirectory())
-							continue;
-						if (!entry.getName().endsWith("bootstrap.json"))
-							continue;
-						InputStreamReader reader = new InputStreamReader(jarZip.getInputStream(entry));
-						JsonObject bsObj = new Gson().fromJson(reader, JsonObject.class);
-
-						String modid = bsObj.get("modid").getAsString();
-						checkVersion(modid, bsObj.get("required").getAsString());
-
-						JsonObject libs = bsObj.getAsJsonObject("libs");
-						for (Entry<String, JsonElement> libEntry : libs.entrySet()) {
-							JsonObject lib = libEntry.getValue().getAsJsonObject();
-							String version = lib.get("version").getAsString();
-							String required = lib.get("required").getAsString();
-							logger.debug("mod {} provides {} version {} and requires version {}", modid,
-									libEntry.getKey(), version, required);
-							addLib(modid, modPath.toFile(), libEntry.getKey(), version, required);
-						}
-					}
-				} catch (IOException e) {
-					logger.error("Could not open the jar file", e);
-					continue;
+				if (!Files.isRegularFile(modPath)) {
+					if (modPath.getFileName().toString().equals(mcVersion))
+						discoverFromDir(modPath, mcVersion);
+				} else {
+					discoverFromZip(modPath);
 				}
 			}
 		} catch (IOException e) {
 		}
 	}
 
-	public void load() {
+	private void discoverFromZip(Path modPath) {
+		try (ZipFile jarZip = new ZipFile(modPath.toFile())) {
+			ZipEntry manifestEntry = jarZip.getEntry("META-INF/MANIFEST.MF");
+			if (manifestEntry != null) {
+				String bootstrapPath = getBootstrapPathFromManifest(jarZip, manifestEntry);
+				if (bootstrapPath == null)
+					return;
+
+				ZipEntry bootstrapEntry = jarZip.getEntry(bootstrapPath);
+				if (bootstrapEntry == null) {
+					logger.warn(
+							"Could not get " + bootstrapPath + " from " + modPath.getFileName().toString());
+					return;
+				}
+				if (bootstrapEntry.isDirectory())
+					return;
+
+				InputStreamReader reader =
+						new InputStreamReader(jarZip.getInputStream(bootstrapEntry));
+				JsonObject bsObj = new Gson().fromJson(reader, JsonObject.class);
+
+				String modid = bsObj.get("modid").getAsString();
+				checkVersion(modid, bsObj.get("required").getAsString());
+
+				JsonObject libs = bsObj.getAsJsonObject("libs");
+				for (Entry<String, JsonElement> libEntry : libs.entrySet()) {
+					JsonObject lib = libEntry.getValue().getAsJsonObject();
+					String version = lib.get("version").getAsString();
+					String required = lib.get("required").getAsString();
+					logger.debug("mod {} provides {} version {} and requires version {}", modid,
+							libEntry.getKey(), version, required);
+					addLib(modid, modPath.toFile(), libEntry.getKey(), version, required);
+				}
+			}
+		} catch (IOException e) {
+			logger.error("Could not open the jar file", e);
+			return;
+		}
+	}
+
+	private String getBootstrapPathFromManifest(ZipFile zip, ZipEntry manifestEntry) {
+		Properties props = new Properties();
+		try {
+			props.load(zip.getInputStream(manifestEntry));
+		} catch (IOException e) {
+			return null;
+		}
+		if (props.containsKey("H3NTBootstrap"))
+			return props.getProperty("H3NTBootstrap");
+		return null;
+	}
+
+	private String getMinecraftVersion() {
+		InputStream stream =
+				Launch.classLoader.getResourceAsStream("net/minecraft/server/MinecraftServer.class");
+		ClassNode serverClass = new ClassNode();
+		try {
+			new ClassReader(stream).accept(serverClass, 0);
+		} catch (IOException e) {
+			throw new RuntimeException("could not detect the running version");
+		}
+		VersionScannerVisitor versionScanner = new VersionScannerVisitor();
+		Iterator<MethodNode> methodIter = serverClass.methods.iterator();
+		while (methodIter.hasNext()) {
+			MethodNode method = methodIter.next();
+			method.accept(versionScanner);
+		}
+		if (versionScanner.version == null)
+			throw new RuntimeException("could not detect the running version");
+		return versionScanner.version;
+	}
+
+	private void load() {
 		Path libsDir = getLibsDir();
 		if (libsDir == null)
 			return;
@@ -185,6 +246,16 @@ public class Bootstrap {
 		}
 	}
 
+	public static class BootstrapError extends RuntimeException {
+		public BootstrapError(String msg) {
+			super(msg);
+		}
+
+		public BootstrapError(String msg, Exception ex) {
+			super(msg, ex);
+		}
+	}
+
 	private class LibEntry {
 		private final String name;
 		private ComparableVersion latestVersion;
@@ -223,6 +294,36 @@ public class Bootstrap {
 									entry.getValue() + " but the version " + latestVersion.toString() +
 									" is loaded");
 			}
+		}
+	}
+
+	class VersionScannerVisitor extends MethodVisitor {
+
+		public VersionScannerVisitor() {
+			super(Opcodes.ASM4);
+		}
+
+		public String version = null;
+
+		Pattern normalVer = Pattern.compile("^\\d+\\.\\d+(\\.\\d+)?$");
+		Pattern snapVer = Pattern.compile("^\\d\\dw\\d+[a-z]$");
+
+		@Override
+		public void visitLdcInsn(Object cst) {
+			if (cst instanceof String) {
+				String potentialVersion = (String) cst;
+				if (normalVer.matcher(potentialVersion).matches())
+					setVersion(potentialVersion);
+				else if (snapVer.matcher(potentialVersion).matches())
+					setVersion(potentialVersion);
+			}
+			super.visitLdcInsn(cst);
+		}
+
+		private void setVersion(String potentialVersion) {
+			if (version != null && !version.equals(potentialVersion))
+				throw new RuntimeException("could not detect running version, multiple matches");
+			version = potentialVersion;
 		}
 	}
 }

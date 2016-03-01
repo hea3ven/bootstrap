@@ -220,7 +220,8 @@ public class Bootstrap {
 				// Remove other versions
 				try (DirectoryStream<Path> dirStream = Files.newDirectoryStream(libsDir)) {
 					for (Path path : dirStream) {
-						if (path.startsWith(entry.getName() + "-") && path.endsWith(".jar")) {
+						if (path.getFileName().toString().startsWith(entry.getName() + "-") &&
+								path.toString().endsWith(".jar")) {
 							logger.debug("removing old file {}", path.toString());
 							Files.delete(path);
 						}

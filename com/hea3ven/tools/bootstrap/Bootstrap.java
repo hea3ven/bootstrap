@@ -12,7 +12,6 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Iterator;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Properties;
@@ -20,7 +19,6 @@ import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
-import com.google.common.base.Throwables;
 import com.google.common.collect.Maps;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
@@ -74,11 +72,11 @@ public class Bootstrap {
 		URL jarUrl = Bootstrap.class.getProtectionDomain().getCodeSource().getLocation();
 		if (!jarUrl.getProtocol().equals("jar"))
 			return null;
-		String jarFilePath = null;
+		String jarFilePath;
 		try {
 			jarFilePath = Paths.get(new URI(jarUrl.getPath())).toString();
 		} catch (URISyntaxException e) {
-			Throwables.propagate(e);
+			throw new BootstrapError("Could not get the current jar's path", e);
 		}
 		if (jarFilePath.lastIndexOf('!') != -1)
 			jarFilePath = jarFilePath.substring(0, jarFilePath.lastIndexOf('!'));
@@ -118,6 +116,7 @@ public class Bootstrap {
 				}
 			}
 		} catch (IOException e) {
+			throw new RuntimeException("Error discovering mods from " + modsDir, e);
 		}
 	}
 
@@ -157,7 +156,6 @@ public class Bootstrap {
 			}
 		} catch (IOException e) {
 			logger.error("Could not open the jar file", e);
-			return;
 		}
 	}
 
@@ -183,11 +181,8 @@ public class Bootstrap {
 			throw new RuntimeException("could not detect the running version");
 		}
 		VersionScannerVisitor versionScanner = new VersionScannerVisitor();
-		Iterator<MethodNode> methodIter = serverClass.methods.iterator();
-		while (methodIter.hasNext()) {
-			MethodNode method = methodIter.next();
+		for (MethodNode method : serverClass.methods)
 			method.accept(versionScanner);
-		}
 		if (versionScanner.version == null)
 			throw new RuntimeException("could not detect the running version");
 		return versionScanner.version;

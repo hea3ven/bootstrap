@@ -41,7 +41,7 @@ public class Bootstrap {
 
 	private static final Logger logger = LogManager.getLogger("H3NTBootstrap.Bootstrap");
 
-	public static final String version = "1.1.1";
+	public static final String version = "1.1.3";
 	private static boolean init = false;
 
 	private Map<String, LibEntry> libs = Maps.newHashMap();
@@ -178,7 +178,7 @@ public class Bootstrap {
 		try {
 			new ClassReader(stream).accept(serverClass, 0);
 		} catch (IOException e) {
-			throw new RuntimeException("could not detect the running version");
+			throw new RuntimeException("could not detect the running version", e);
 		}
 		VersionScannerVisitor versionScanner = new VersionScannerVisitor();
 		for (MethodNode method : serverClass.methods)

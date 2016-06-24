@@ -100,6 +100,11 @@ public class Bootstrap {
 		File mcDir = ReflectionHelper.getPrivateValue(FMLRelaunchLog.class, null, "minecraftHome");
 		Path modsDir = Paths.get(mcDir.toString(), "mods");
 
+		if(!Files.exists(modsDir)) {
+			logger.warn("The mods directory doesn't exist");
+			return;
+		}
+
 		String mcVersion = getMinecraftVersion();
 		discoverFromDir(modsDir, mcVersion);
 	}
